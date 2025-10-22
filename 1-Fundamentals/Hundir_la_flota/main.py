@@ -16,6 +16,7 @@ class Casilla(Enum):
     AGUA = "O"
     TOCADO = "X"
     INCOGNITA = " "
+    BARCO = "X"
 
 class Barco:
 
@@ -45,13 +46,25 @@ class Barco:
             self.posiciones_tocadas_en_tablero.append(False) # En la creación ningún barco está tocado
 
 
+    def set_posicion_tocada(self, tupla_posicion: tuple):
+        barco_index = self.posiciones_en_tablero.index(tupla_posicion)
+        self.posiciones_tocadas_en_tablero[barco_index] = True
 
-        # Convertir letra_columna_top_left y numero_fila_top_left en índices indexados a cero, y casillas en modo índice
+    def get_esta_hundido(self):
+        return np.all(self.posiciones_tocadas_en_tablero) ## Si todas las posiciones están tocadas, esá hundido
+    
+    def get_tuplas_de_posicion_tocadas(self):
+        tuplas_de_posicion_tocadas = [tuple]
+
+        for index,is_posicion_tocada in self.posiciones_tocadas_en_tablero:
+            if is_posicion_tocada:
+                tupla_tocada = self.posiciones_en_tablero[index]
+                tuplas_de_posicion_tocadas.append(tupla_tocada)
+
+        return tuplas_de_posicion_tocadas
+
 
 class Disparo:
-    letra_columna: str = None
-    numero_fila: int = None
-
     def __init__(self, tamano_tablero: int, letra_columna: str, numero_fila: int):
         posibles_columnas_para_tamano_tablero = Constants.COLUMNAS_PERMITIDAS[0:len(tamano_tablero)]
 
@@ -63,12 +76,16 @@ class Disparo:
             raise Exception("La columna debe ser numérica")
         ## TODO: añadir validaciones
 
-        self.letra_columna = letra_columna
-        self.numero_fila = numero_fila
+        self.fila_index = Utils.get_indice_fila(numero_fila)
+        self.columna_index = Utils.get_indice_columna(letra_columna)
+
+    def get_tupla_posicion(self):
+        return tuple(self.fila_index, self.columna_index)
 
 class Tablero:
     tablero: np.array
     barcos: list[Barco]
+    disparos_recibidos: list[Disparo]
     tamano_tablero: int
 
     def __init__(self, tamano_tablero: int):
@@ -85,7 +102,23 @@ class Tablero:
         pass
 
     def set_disparo(self, disparo: Disparo):
-        return "AGUA!!" # TOCADO!! / HUNDIDO!!
+        self.disparos_recibidos.append(disparo)
+
+        tupla_posicion = disparo.get_tupla_posicion()
+        contenido_casilla = self.tablero[tupla_posicion]
+
+        if isinstance(contenido_casilla, Barco):
+            barco = contenido_casilla
+            barco.set_posicion_tocada(tupla_posicion)
+
+            if barco.get_esta_hundido():
+                return "HUNDIDO!!"
+            else:
+                return "TOCADO!!"
+
+        ## Si llegamos hasta aquí, no es un barco y por lo tanto es agua
+        self.tablero[tupla_posicion] = Casilla.AGUA.value
+        return "AGUA!!"
 
     def set_barcos_aleatoriamente(self):
         ## Nos aseguramos de añadir primero los barcos de mayor eslora; si los dejamos para el final puede que no nos entren
@@ -98,23 +131,44 @@ class Tablero:
                 try:
                     self.add_barco(barco_aleatorio)
                     break ## Salir del bucle while para 
-                except:
-                    pass
+                except Exception as e:
+                    print(e)
 
     def get_quedan_barcos_por_hundir(self) -> bool:
         return True # TODO
     
     def get_representacion_tablero_para_el_oponente(self) -> np.array:
-        pass
+        representacion_tablero = self.tablero.copy() # hacemos una copia para no modificar el original
+
+        ## antes de procesar los tocados, marcamos todos los disparos como agua
+        for disparo in self.disparos_recibidos:
+            tupla_posicion = disparo.get_tupla_posicion()
+            representacion_tablero[tupla_posicion] = Casilla.AGUA.value 
+
+        ## A continuación, representamos todos los tocados
+        for barco in self.barcos:
+            for tupla_posicion_tocada in barco.get_tuplas_de_posicion_tocadas():
+                representacion_tablero[tupla_posicion_tocada] = Casilla.TOCADO.value 
+
+        return self.get_representacion_con_coordenadas(representacion_tablero)
 
     def get_representacion_tablero_defendido(self) -> np.array:
         pass
 
     def get_representacion_tablero_original(self) -> np.array:
+        representacion_tablero = self.tablero.copy()
+
+        is_barco = np.vectorize(lambda x: isinstance(x, Barco))
+        mask = is_barco(representacion_tablero)
+        representacion_tablero[mask] = Casilla.BARCO.value
+
+        return self.get_representacion_con_coordenadas(representacion_tablero)
+    
+    def get_representacion_con_coordenadas(self, tablero: np.array):
         vector_letras_columnas = self.get_vector_letras_columnas()
         array_2d_numeros_fila = self.get_array_2d_numeros_filas()
 
-        tablero_con_columnas = np.vstack([vector_letras_columnas, self.tablero])
+        tablero_con_columnas = np.vstack([vector_letras_columnas, tablero])
         tablero_con_filas_y_columnas = np.hstack([array_2d_numeros_fila, tablero_con_columnas])
 
         return tablero_con_filas_y_columnas
@@ -138,19 +192,17 @@ class Tablero:
         for fila_index,columna_index in barco.posiciones_en_tablero:
             try:
                 contenido_casilla = tablero_temporal[fila_index][columna_index] ## elevará excepción si no existe en el tablero; puede ocurrir cuando se intenta meter un barco de eslora grande con un punto de origen muy debajo a la derecha
-                if isinstance(contenido_casilla, type(Barco)):
+                if isinstance(contenido_casilla, Barco):
                     raise Exception(f"Ya existe un barco en la posición ({fila_index},{columna_index})")
                     
                 tablero_temporal[fila_index][columna_index] = barco
 
             except Exception as e:
-                print ("sssssssssssssssssss:", e) # TODO: remove
                 raise Exception('Este barco no entra en el tablero') # pasará habitualmente cuando estemos añadiendo barcos aleatorios
 
         # si llegamos hasta aquí es porque hemos podido añadir el barco entero, así que asignamos tablero_temporal al tablero real
         self.tablero = tablero_temporal
-        
-
+        self.barcos.append(barco)
 
 class Utils:
     import random
@@ -205,6 +257,8 @@ print(tablero_jugador.get_representacion_tablero_original())
 
 tablero_jugador.set_barcos_aleatoriamente()
 
+print(tablero_jugador.get_representacion_tablero_original())
+
 tablero_maquina = Tablero(tamano_tablero_int) # Raises exception if not valid
 tablero_maquina.set_barcos_aleatoriamente()
 
@@ -213,6 +267,7 @@ turno_count = 0
 
 while True:
     turno_count += 1
+    print("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
     print(f"TURNO '{turno_count}'")
     print("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
 
