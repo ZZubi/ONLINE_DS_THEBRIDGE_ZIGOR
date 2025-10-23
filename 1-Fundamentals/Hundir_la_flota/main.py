@@ -1,4 +1,5 @@
 from enum import Enum
+from tqdm import tqdm
 import random
 import numpy as np
 import time
@@ -19,6 +20,11 @@ class Casilla(Enum):
     TOCADO = "X"
     INCOGNITA = " "
     BARCO = "X"
+
+class ResultadoDisparo(Enum):
+    AGUA = "AGUA !!"
+    TOCADO = "TOCADO !!"
+    HUNDIDO = "HUNDIDO !!"
 
 class Barco:
 
@@ -74,7 +80,7 @@ class Disparo:
 
         if not isinstance(tamano_tablero, int):
             raise Exception("tamano_tablero debe ser un valor entero")
-        elif  Constants.TAMANO_MINIMO_TABLERO > tamano_tablero > Constants.TAMANO_MAXIMO_TABLERO:
+        elif  Constants.TAMANO_MINIMO_TABLERO > tamano_tablero  or tamano_tablero > Constants.TAMANO_MAXIMO_TABLERO:
             raise Exception(f"El tamaño del tablero debe estar comprendido entre {Constants.TAMANO_MINIMO_TABLERO} y {len(Constants.TAMANO_MAXIMO_TABLERO)}")
         elif not isinstance(letra_columna, str) or len(letra_columna) != 1:
             raise Exception("La columna debe ser una letra, y sólo una")
@@ -103,11 +109,14 @@ class Tablero:
     disparos_recibidos: list[Disparo]
     tamano_tablero: int
 
-    def __init__(self, tamano_tablero: int):
-        ## TODO: first check int type
-
+    def __init__(self, tamano_tablero: str):
+        try:
+            tamano_tablero = int(tamano_tablero)
+        except:
+            raise Exception("El tamaño del tablero debe ser numérico")
+        
         # Check valid size
-        if Constants.TAMANO_MINIMO_TABLERO > tamano_tablero > Constants.TAMANO_MAXIMO_TABLERO:
+        if Constants.TAMANO_MINIMO_TABLERO > tamano_tablero  or tamano_tablero > Constants.TAMANO_MAXIMO_TABLERO:
             raise Exception(f"El tamaño del tablero debe estar comprendido entre {Constants.TAMANO_MINIMO_TABLERO} y {Constants.TAMANO_MAXIMO_TABLERO} (ambos incluidos)")
         
         self.tamano_tablero = tamano_tablero
@@ -137,13 +146,13 @@ class Tablero:
             barco.set_posicion_tocada(tupla_posicion)
 
             if barco.get_esta_hundido():
-                return "HUNDIDO!!"
+                return ResultadoDisparo.HUNDIDO.value
             else:
-                return "TOCADO!!"
+                return ResultadoDisparo.TOCADO.value
 
         ## Si llegamos hasta aquí, no es un barco y por lo tanto es agua
         self.tablero[tupla_posicion] = Casilla.AGUA.value
-        return "AGUA!!"
+        return ResultadoDisparo.AGUA.value
 
     def set_barcos_aleatoriamente(self):
         ## Nos aseguramos de añadir primero los barcos de mayor eslora; si los dejamos para el final puede que no nos entren
@@ -183,9 +192,6 @@ class Tablero:
         return self.get_representacion_con_coordenadas(representacion_tablero)
 
     def get_representacion_tablero_defendido(self) -> np.array:
-        pass
-
-    def get_representacion_tablero_original(self) -> np.array:
         representacion_tablero = self.tablero.copy()
 
         is_barco = np.vectorize(lambda x: isinstance(x, Barco))
@@ -240,6 +246,7 @@ class Utils:
 
     def get_disparo_jugador(tamano_tablero: int):
         while True:
+            print()
             columna_a_disparar = input("Introduce la letra de la columna a la que disparar (A, B, C, ...): ")
             fila_a_disparar = input("Introduce el número de la fila a la que disparar (1, 2, 3, ...): ")
 
@@ -283,58 +290,108 @@ class Utils:
         )
 
 
+# Pregunta por el tamaño del tablero; 
+# Crea y muestra el tablero del jugador:
+######################################################################################
+
 while True:
+    print()
     tamano_tablero = input("Introduce el tamaño del tablero: ")
     try:
-        tamano_tablero_int = int(tamano_tablero) # Raises exception if can't be converted
-        tablero_jugador = Tablero(tamano_tablero_int) # Raises exception if not valid
+        tablero_jugador = Tablero(tamano_tablero) # Eleva una excepción si no se pasa un tamaño válido
         break
     except Exception as e:
-        print("Inténtalo de nuevo, el valor introducido no es válido:", e)
+        print(e, " - Inténtalo de nuevo")
 
+tamano_tablero_int = tablero_jugador.tamano_tablero
 tablero_jugador.set_barcos_aleatoriamente()
 
-print("Tablero jugador:")
-print(tablero_jugador.get_representacion_tablero_original())
+print()
+print("_______________________ TABLERO JUGADOR _______________________")
+print()
+print(tablero_jugador.get_representacion_tablero_defendido())
 
-tablero_maquina = Tablero(tamano_tablero_int) # Raises exception if not valid
+
+## Crea y muestra el tablero del oponente:
+######################################################################################
+
+tablero_maquina = Tablero(tamano_tablero) # Eleva una excepción si no se pasa un tamaño válido
 tablero_maquina.set_barcos_aleatoriamente()
 
-print("Tablero oponente:")
-print(tablero_maquina.get_representacion_tablero_original())
+print()
+print("_______________________ TABLERO OPONENTE _______________________")
+print()
+print(tablero_maquina.get_representacion_tablero_defendido())
 
-partida_terminada = False
+## Comienza los turnos:
+######################################################################################
 turno_count = 0
 
 while True:
     turno_count += 1
+
+    print()
     print("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
     print(f"TURNO '{turno_count}'")
     print("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+    print()
+
+
+    partida_terminada = False
 
     ## Turno del jugador:
-    disparo_jugador = Utils.get_disparo_jugador(tamano_tablero_int)
-    resultado = tablero_maquina.set_disparo(disparo_jugador)
-    print(f"{resultado} - Tu tablero de ataque queda así:")
-    print(tablero_maquina.get_representacion_tablero_para_el_oponente())
-    print('________________________________________________________________________________________________')
+    while True:
+        disparo_jugador = Utils.get_disparo_jugador(tamano_tablero_int)
+        resultado = tablero_maquina.set_disparo(disparo_jugador)
 
-    if (not tablero_maquina.get_quedan_barcos_por_hundir()):
-        print("HAS GANADO!!! Este era el tablero original de tu oponente:")
-        print(tablero_maquina.get_representacion_tablero_original())
+        print()
+        print(f"{resultado} - Tu tablero de ataque queda así:")
+        print()
+        print(tablero_maquina.get_representacion_tablero_para_el_oponente())
+        print()
+        print('________________________________________________________________________________________________')
+        print()
+
+        if (not tablero_maquina.get_quedan_barcos_por_hundir()):
+            print("HAS GANADO!!!")
+            print()
+            partida_terminada = True
+            break
+
+        if resultado == ResultadoDisparo.AGUA.value:
+            break # el resultado Agua no da derecho a continuar el turno del jugador, salimos del bucle
+
+    if partida_terminada:
         break
 
+    # Simula que el oponente está pensando con una barra de progreso
+    for i in tqdm(range(200), desc="Tu oponente está pensando..."):
+        time.sleep(0.01)
+    
     ## Turno de la máquina:
-    disparo_maquina = Utils.get_disparo_maquina(tablero_jugador)
-    resultado = tablero_jugador.set_disparo(disparo_maquina)
-    print(f"Tu oponente ha disparado a la coordenada {disparo_maquina.letra_columna} {disparo_maquina.numero_fila}")
-    print(f"El resultado ha sido {resultado} - Tu tablero de defensa queda así:")
-    print(tablero_jugador.get_representacion_tablero_defendido())
-    print('________________________________________________________________________________________________')
+    while True:
+        disparo_maquina = Utils.get_disparo_maquina(tablero_jugador)
+        resultado = tablero_jugador.set_disparo(disparo_maquina)
 
-    if (not tablero_jugador.get_quedan_barcos_por_hundir()):
-        print("HAS PERDIDO!!! Este era el tablero original de tu oponente:")
-        print(tablero_maquina.get_representacion_tablero_original())
+        print()
+        print(f"Tu oponente ha disparado a la coordenada {disparo_maquina.letra_columna} {disparo_maquina.numero_fila}")
+        print()
+        print(f"El resultado ha sido {resultado} - Tu oponente puede ver esta parte de tu tablero:")
+        print()
+        print(tablero_jugador.get_representacion_tablero_para_el_oponente())
+        print()
+        print('________________________________________________________________________________________________')
+        print()
+
+        if (not tablero_jugador.get_quedan_barcos_por_hundir()):
+            print("HAS PERDIDO!!!")
+            partida_terminada = True
+            break
+
+        if resultado == ResultadoDisparo.AGUA.value:
+            break # el resultado Agua no da derecho a continuar el turno del jugador, salimos del bucle
+
+        time.sleep(5) ## Esperar para dar tiempo a ver la pantalla
+
+    if partida_terminada:
         break
-
-    time.sleep(8) ## Esperar para dar tiempo a ver la pantalla
