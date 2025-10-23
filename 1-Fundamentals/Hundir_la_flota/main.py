@@ -1,12 +1,14 @@
 from enum import Enum
 import random
 import numpy as np
+import time
 
 class Constants:
     COLUMNAS_PERMITIDAS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
     TAMANO_MINIMO_TABLERO = 6
     TAMANO_MAXIMO_TABLERO = len(COLUMNAS_PERMITIDAS)
-    ESLORA_DE_LOS_BARCOS_DE_UNA_PARTIDA = [4, 3, 3, 2, 2, 2]
+    #ESLORA_DE_LOS_BARCOS_DE_UNA_PARTIDA = [4, 3, 3, 2, 2, 2]
+    ESLORA_DE_LOS_BARCOS_DE_UNA_PARTIDA = [2]
 
 class Orientacion(Enum):
     HORIZONTAL = "horizontal"
@@ -54,9 +56,9 @@ class Barco:
         return np.all(self.posiciones_tocadas_en_tablero) ## Si todas las posiciones están tocadas, esá hundido
     
     def get_tuplas_de_posicion_tocadas(self):
-        tuplas_de_posicion_tocadas = [tuple]
+        tuplas_de_posicion_tocadas = []
 
-        for index,is_posicion_tocada in self.posiciones_tocadas_en_tablero:
+        for index,is_posicion_tocada in enumerate(self.posiciones_tocadas_en_tablero):
             if is_posicion_tocada:
                 tupla_tocada = self.posiciones_en_tablero[index]
                 tuplas_de_posicion_tocadas.append(tupla_tocada)
@@ -65,22 +67,35 @@ class Barco:
 
 
 class Disparo:
-    def __init__(self, tamano_tablero: int, letra_columna: str, numero_fila: int):
-        posibles_columnas_para_tamano_tablero = Constants.COLUMNAS_PERMITIDAS[0:len(tamano_tablero)]
+    def __init__(self, tamano_tablero: int, letra_columna: str, numero_fila: str):
+        # Ponemos todo en mayúsculas
+        letra_columna = letra_columna.upper()
+        posibles_columnas_para_tamano_tablero = [letra.upper() for letra in Constants.COLUMNAS_PERMITIDAS[0:tamano_tablero]]
 
         if not isinstance(tamano_tablero, int):
             raise Exception("tamano_tablero debe ser un valor entero")
         elif  Constants.TAMANO_MINIMO_TABLERO > tamano_tablero > Constants.TAMANO_MAXIMO_TABLERO:
             raise Exception(f"El tamaño del tablero debe estar comprendido entre {Constants.TAMANO_MINIMO_TABLERO} y {len(Constants.TAMANO_MAXIMO_TABLERO)}")
-        elif not isinstance(letra_columna, str):
-            raise Exception("La columna debe ser numérica")
-        ## TODO: añadir validaciones
+        elif not isinstance(letra_columna, str) or len(letra_columna) != 1:
+            raise Exception("La columna debe ser una letra, y sólo una")
+        elif letra_columna.upper() not in posibles_columnas_para_tamano_tablero:
+            raise Exception ("La letra de la columna debe estar comprendida entre las siguientes:", posibles_columnas_para_tamano_tablero)
+        
+        try:
+            numero_fila_int = int(numero_fila)
+        except:
+            raise Exception("El numero de fila introducido debe ser numérico")
+        
+        if 1 > numero_fila_int > tamano_tablero:
+            raise Exception("El número de fila introducida no puede ser menor de 1 ni mayor que el tamaño del tablero")
 
-        self.fila_index = Utils.get_indice_fila(numero_fila)
+        self.fila_index = Utils.get_indice_fila(numero_fila_int)
         self.columna_index = Utils.get_indice_columna(letra_columna)
+        self.letra_columna = letra_columna
+        self.numero_fila = numero_fila
 
     def get_tupla_posicion(self):
-        return tuple(self.fila_index, self.columna_index)
+        return tuple([self.fila_index, self.columna_index])
 
 class Tablero:
     tablero: np.array
@@ -96,10 +111,20 @@ class Tablero:
             raise Exception(f"El tamaño del tablero debe estar comprendido entre {Constants.TAMANO_MINIMO_TABLERO} y {Constants.TAMANO_MAXIMO_TABLERO} (ambos incluidos)")
         
         self.tamano_tablero = tamano_tablero
-        self.tablero = np.full((tamano_tablero,tamano_tablero), " ", dtype=object)
+        self.tablero = np.full((tamano_tablero,tamano_tablero), Casilla.INCOGNITA.value, dtype=object)
+        self.barcos = []
+        self.disparos_recibidos = []
 
-    def get_coordenadas_sin_disparo(self):
-        pass
+    def get_tuplas_posicion_sin_disparo(self):
+        all_position_tuples = list(np.ndindex(self.tamano_tablero, self.tamano_tablero))
+        disparo_position_tuples = []
+
+        for disparo in self.disparos_recibidos:
+            disparo_position_tuples.append(disparo.get_tupla_posicion())
+
+        tuplas_de_posicion_sin_disparo = set(all_position_tuples) - set(disparo_position_tuples)
+
+        return list(tuplas_de_posicion_sin_disparo)
 
     def set_disparo(self, disparo: Disparo):
         self.disparos_recibidos.append(disparo)
@@ -135,17 +160,22 @@ class Tablero:
                     print(e)
 
     def get_quedan_barcos_por_hundir(self) -> bool:
-        return True # TODO
+        for barco in self.barcos:
+            if not barco.get_esta_hundido():
+                return True
+            
+        return False ## Todos los barcos están hundidos
     
     def get_representacion_tablero_para_el_oponente(self) -> np.array:
         representacion_tablero = self.tablero.copy() # hacemos una copia para no modificar el original
+        representacion_tablero.fill(Casilla.INCOGNITA.value) # Ocultamos todas las casillas
 
         ## antes de procesar los tocados, marcamos todos los disparos como agua
         for disparo in self.disparos_recibidos:
             tupla_posicion = disparo.get_tupla_posicion()
             representacion_tablero[tupla_posicion] = Casilla.AGUA.value 
 
-        ## A continuación, representamos todos los tocados
+        ## A continuación, representamos todos los tocados (sobreescribirá algunas que hayamos marcado previamente como AGUA)
         for barco in self.barcos:
             for tupla_posicion_tocada in barco.get_tuplas_de_posicion_tocadas():
                 representacion_tablero[tupla_posicion_tocada] = Casilla.TOCADO.value 
@@ -192,6 +222,7 @@ class Tablero:
         for fila_index,columna_index in barco.posiciones_en_tablero:
             try:
                 contenido_casilla = tablero_temporal[fila_index][columna_index] ## elevará excepción si no existe en el tablero; puede ocurrir cuando se intenta meter un barco de eslora grande con un punto de origen muy debajo a la derecha
+
                 if isinstance(contenido_casilla, Barco):
                     raise Exception(f"Ya existe un barco en la posición ({fila_index},{columna_index})")
                     
@@ -209,8 +240,8 @@ class Utils:
 
     def get_disparo_jugador(tamano_tablero: int):
         while True:
-            columna_a_disparar = input("Introduce la letra de la columna a la que disparar (A, B, C, ...):")
-            fila_a_disparar = input("Introduce el número de la fila a la que disparar (1, 2, 3, ...):")
+            columna_a_disparar = input("Introduce la letra de la columna a la que disparar (A, B, C, ...): ")
+            fila_a_disparar = input("Introduce el número de la fila a la que disparar (1, 2, 3, ...): ")
 
             try:
                 disparo = Disparo(tamano_tablero, columna_a_disparar, fila_a_disparar)
@@ -219,9 +250,11 @@ class Utils:
                 print(f"{e} - Por favor, inténtalo de nuevo")
 
     def get_disparo_maquina(tablero_jugador: Tablero):
-        coordenadas_sin_disparo = tablero_jugador.get_coordenadas_sin_disparo()
-        coordenada_disponible_random =  Utils.random.choice(coordenadas_sin_disparo)
-        letra_columna, numero_fila = coordenada_disponible_random
+        tuplas_posicion_sin_disparo = tablero_jugador.get_tuplas_posicion_sin_disparo()
+        tupla_posicion_disponible_random =  Utils.random.choice(tuplas_posicion_sin_disparo)
+
+        letra_columna = Utils.get_letra_coordenada(tupla_posicion_disponible_random[1])
+        numero_fila = Utils.get_numero_coordenada(tupla_posicion_disponible_random[0])
 
         ## Asumimos que aquí no obtendremos una excepción ya que hemos elegido entre las coordenadas que el tablero nos indica están libres
         return Disparo(tablero_jugador.tamano_tablero, letra_columna, numero_fila)
@@ -231,6 +264,12 @@ class Utils:
     
     def get_indice_fila(numero_fila: int):
         return numero_fila - 1
+    
+    def get_letra_coordenada(indice: int):
+        return Constants.COLUMNAS_PERMITIDAS[indice]
+    
+    def get_numero_coordenada(indice: int):
+        return indice + 1
     
     def get_barco_aleatorio(eslora: int, tamano_tablero: int):
         valores_de_columna_posibles = Constants.COLUMNAS_PERMITIDAS[0:tamano_tablero]
@@ -245,7 +284,7 @@ class Utils:
 
 
 while True:
-    tamano_tablero = input("Introduce el tamaño del tablero:")
+    tamano_tablero = input("Introduce el tamaño del tablero: ")
     try:
         tamano_tablero_int = int(tamano_tablero) # Raises exception if can't be converted
         tablero_jugador = Tablero(tamano_tablero_int) # Raises exception if not valid
@@ -253,14 +292,16 @@ while True:
     except Exception as e:
         print("Inténtalo de nuevo, el valor introducido no es válido:", e)
 
-print(tablero_jugador.get_representacion_tablero_original())
-
 tablero_jugador.set_barcos_aleatoriamente()
 
+print("Tablero jugador:")
 print(tablero_jugador.get_representacion_tablero_original())
 
 tablero_maquina = Tablero(tamano_tablero_int) # Raises exception if not valid
 tablero_maquina.set_barcos_aleatoriamente()
+
+print("Tablero oponente:")
+print(tablero_maquina.get_representacion_tablero_original())
 
 partida_terminada = False
 turno_count = 0
@@ -296,3 +337,4 @@ while True:
         print(tablero_maquina.get_representacion_tablero_original())
         break
 
+    time.sleep(8) ## Esperar para dar tiempo a ver la pantalla
